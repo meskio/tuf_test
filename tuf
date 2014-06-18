@@ -1,0 +1,114 @@
+#!/home/meskio/dev/leap/env/bin/python
+##!/usr/bin/env python
+
+import datetime
+import os
+import shutil
+import sys
+
+import tuf.client.updater
+from tuf.repository_tool import *
+
+KEYS_PATH = "keys"
+REPO_PATH = "repo"
+CLIENT_PATH = "client"
+
+def main():
+    if len(sys.argv) < 2:
+        usage()
+
+    if sys.argv[1] == "create":
+        create()
+    elif sys.argv[1] == "targets":
+        targets()
+    elif sys.argv[1] == "timestamp":
+        timestamp()
+    elif sys.argv[1] == "setup-client":
+        setup_client()
+    elif sys.argv[1] == "update":
+        update()
+    else:
+        usage()
+
+def usage():
+    pass #TODO
+
+def create():
+    repository = create_new_repository(REPO_PATH)
+    create_root_keys(repository)
+    create_target_keys(repository)
+    create_timestamp_key(repository)
+    repository.write()
+    shutil.copytree(os.path.join(REPO_PATH, 'metadata.staged'), os.path.join(REPO_PATH, 'metadata'))
+
+def create_root_keys(repository):
+    generate_and_write_rsa_keypair(os.path.join(KEYS_PATH, "root"))
+    public_root_key = import_rsa_publickey_from_file(os.path.join(KEYS_PATH, "root.pub"))
+    repository.root.add_verification_key(public_root_key)
+    private_root_key = import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "root"))
+    repository.root.load_signing_key(private_root_key)
+
+def create_target_keys(repository):
+    generate_and_write_rsa_keypair(os.path.join(KEYS_PATH, "target"))
+    public_target_key = import_rsa_publickey_from_file(os.path.join(KEYS_PATH, "target.pub"))
+    repository.targets.add_verification_key(public_target_key)
+    repository.snapshot.add_verification_key(public_target_key)
+    private_target_key = import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
+    repository.targets.load_signing_key(private_target_key)
+    repository.snapshot.load_signing_key(private_target_key)
+    repository.targets.compressions = ["gz"]
+    repository.snapshot.compressions = ["gz"]
+
+def create_timestamp_key(repository):
+    generate_and_write_rsa_keypair(os.path.join(KEYS_PATH, "timestamp"))
+    public_timestamp_key = import_rsa_publickey_from_file(os.path.join(KEYS_PATH, "timestamp.pub"))
+    repository.timestamp.add_verification_key(public_timestamp_key)
+    private_timestamp_key = import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "timestamp"))
+    repository.timestamp.load_signing_key(private_timestamp_key)
+
+def targets():
+    repository = load_repository(REPO_PATH)
+    list_of_targets = repository.get_filepaths_in_directory(os.path.join(REPO_PATH, "targets"),
+                                                            recursive_walk=True, followlinks=True) 
+    repository.targets.add_targets(list_of_targets)
+    private_targets_key =  import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
+    repository.targets.load_signing_key(private_targets_key)
+    repository.snapshot.load_signing_key(private_targets_key)
+    repository.write_partial()
+    copy("snapshot.json")
+    copy("snapshot.json.gz")
+    copy("targets.json")
+    copy("targets.json.gz")
+    timestamp()
+
+def timestamp():
+    repository = load_repository(REPO_PATH)
+    private_timestamp_key = import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "timestamp"))
+    repository.timestamp.load_signing_key(private_timestamp_key)
+    repository.write_partial()
+    copy("timestamp.json")
+
+def setup_client():
+    create_tuf_client_directory(REPO_PATH, os.path.join(CLIENT_PATH, "repo"))
+
+def update():
+    tuf.conf.repository_directory = os.path.join(CLIENT_PATH, 'repo')
+    repository_mirrors = {'mirror1': {'url_prefix': 'http://localhost:8001',
+                                      'metadata_path': 'metadata',
+                                      'targets_path': 'targets',
+                                      'confined_target_dirs': ['']}}
+    updater = tuf.client.updater.Updater('leap-updater', repository_mirrors)
+    updater.refresh()
+
+    targets = updater.all_targets()
+    destination_directory = CLIENT_PATH
+    updated_targets = updater.updated_targets(targets, destination_directory)
+    for target in updated_targets:
+        updater.download_target(target, os.path.join(destination_directory, 'update'))
+    updater.remove_obsolete_targets(destination_directory)
+
+def copy(name):
+    shutil.copy(os.path.join(REPO_PATH, "metadata.staged", name), os.path.join(REPO_PATH, "metadata"))
+
+if __name__ == "__main__":
+    main()
