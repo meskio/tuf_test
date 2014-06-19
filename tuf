@@ -46,6 +46,7 @@ def update_repo():
     load_root_keys(repository)
     load_target_keys(repository)
     load_timestamp_key(repository)
+    load_targets(repository)
     repository.write()
     shutil.rmtree(os.path.join(REPO_PATH, 'metadata'))
     shutil.copytree(os.path.join(REPO_PATH, 'metadata.staged'), os.path.join(REPO_PATH, 'metadata'))
@@ -74,10 +75,8 @@ def load_timestamp_key(repository):
 
 def targets():
     repository = load_repository(REPO_PATH)
-    list_of_targets = repository.get_filepaths_in_directory(os.path.join(REPO_PATH, "targets"),
-                                                            recursive_walk=True, followlinks=True) 
-    repository.targets.add_targets(list_of_targets)
     private_targets_key =  import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
+    load_targets(repository)
     repository.targets.load_signing_key(private_targets_key)
     repository.snapshot.load_signing_key(private_targets_key)
     repository.write_partial()
@@ -86,6 +85,11 @@ def targets():
     copy("targets.json")
     copy("targets.json.gz")
     timestamp()
+
+def load_targets(repository):
+    list_of_targets = repository.get_filepaths_in_directory(os.path.join(REPO_PATH, "targets"),
+                                                            recursive_walk=True, followlinks=True) 
+    repository.targets.add_targets(list_of_targets)
 
 def timestamp():
     repository = load_repository(REPO_PATH)
