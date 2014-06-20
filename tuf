@@ -21,6 +21,8 @@ def main():
         create()
     elif sys.argv[1] == "update-repo":
         update_repo()
+    elif sys.argv[1] == "add-role":
+        add_role()
     elif sys.argv[1] == "targets":
         targets()
     elif sys.argv[1] == "timestamp":
@@ -48,7 +50,10 @@ def update_repo():
     load_timestamp_key(repository)
     load_targets(repository)
     repository.write()
-    shutil.rmtree(os.path.join(REPO_PATH, 'metadata'))
+    try:
+        shutil.rmtree(os.path.join(REPO_PATH, 'metadata'))
+    except:
+        pass
     shutil.copytree(os.path.join(REPO_PATH, 'metadata.staged'), os.path.join(REPO_PATH, 'metadata'))
 
 def load_root_keys(repository):
@@ -72,6 +77,26 @@ def load_timestamp_key(repository):
     repository.timestamp.add_verification_key(public_timestamp_key)
     private_timestamp_key = import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "timestamp"))
     repository.timestamp.load_signing_key(private_timestamp_key)
+
+def add_role():
+    if len(sys.argv) < 3:
+        usage()
+        return
+
+    role = sys.argv[2]
+    repository = load_repository(REPO_PATH)
+    private_targets_key =  import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
+    repository.targets.load_signing_key(private_targets_key)
+    public_target_key = import_rsa_publickey_from_file(os.path.join(KEYS_PATH, "target.pub"))
+    repository.targets.delegate(role, [public_target_key], [])
+    repository.targets(role).load_signing_key(private_targets_key)
+    repository.targets(role).compressions = ["gz"]
+    repository.write_partial()
+    try:
+        shutil.rmtree(os.path.join(REPO_PATH, 'metadata', 'targets'))
+    except:
+        pass
+    shutil.copytree(os.path.join(REPO_PATH, 'metadata.staged', 'targets'), os.path.join(REPO_PATH, 'metadata', 'targets'))
 
 def targets():
     repository = load_repository(REPO_PATH)
