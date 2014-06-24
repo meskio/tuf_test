@@ -20,7 +20,8 @@ def main():
     if sys.argv[1] == "create":
         create()
     elif sys.argv[1] == "update-repo":
-        update_repo()
+        repository = load_repository(REPO_PATH)
+        update_repo(repository)
     elif sys.argv[1] == "add-role":
         add_role()
     elif sys.argv[1] == "targets":
@@ -41,10 +42,10 @@ def create():
     generate_and_write_rsa_keypair(os.path.join(KEYS_PATH, "root"))
     generate_and_write_rsa_keypair(os.path.join(KEYS_PATH, "target"))
     generate_and_write_rsa_keypair(os.path.join(KEYS_PATH, "timestamp"))
-    update_repo()
+    repository = create_new_repository(REPO_PATH)
+    update_repo(repository)
 
-def update_repo():
-    repository = load_repository(REPO_PATH)
+def update_repo(repository):
     load_root_keys(repository)
     load_target_keys(repository)
     load_timestamp_key(repository)
@@ -83,43 +84,70 @@ def add_role():
         usage()
         return
 
+    #FIXME: a lot of code copied from targets()
     role = sys.argv[2]
     repository = load_repository(REPO_PATH)
     private_targets_key =  import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
     repository.targets.load_signing_key(private_targets_key)
     public_target_key = import_rsa_publickey_from_file(os.path.join(KEYS_PATH, "target.pub"))
-    repository.targets.delegate(role, [public_target_key], [])
+    repository.targets.delegate(role, [public_target_key], [],
+            restricted_paths=[os.path.join(REPO_PATH, "targets", role)])
     repository.targets(role).load_signing_key(private_targets_key)
     repository.targets(role).compressions = ["gz"]
-    repository.write_partial()
-    try:
-        shutil.rmtree(os.path.join(REPO_PATH, 'metadata', 'targets'))
-    except:
-        pass
-    shutil.copytree(os.path.join(REPO_PATH, 'metadata.staged', 'targets'), os.path.join(REPO_PATH, 'metadata', 'targets'))
-
-def targets():
-    repository = load_repository(REPO_PATH)
-    private_targets_key =  import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
-    load_targets(repository)
-    repository.targets.load_signing_key(private_targets_key)
+    load_targets(repository, role)
     repository.snapshot.load_signing_key(private_targets_key)
+    repository.snapshot.expiration = datetime.datetime.now() + datetime.timedelta(days=90)
+    repository.targets.expiration = datetime.datetime.now() + datetime.timedelta(days=90)
     repository.write_partial()
+    shutil.copy(os.path.join(REPO_PATH, 'metadata.staged', 'targets', role + '.json'), os.path.join(REPO_PATH, 'targets'))
+    shutil.copy(os.path.join(REPO_PATH, 'metadata.staged', 'targets', role + '.json.gz'), os.path.join(REPO_PATH, 'targets'))
     copy("snapshot.json")
     copy("snapshot.json.gz")
     copy("targets.json")
     copy("targets.json.gz")
     timestamp()
 
-def load_targets(repository):
-    list_of_targets = repository.get_filepaths_in_directory(os.path.join(REPO_PATH, "targets"),
-                                                            recursive_walk=True, followlinks=True) 
-    repository.targets.add_targets(list_of_targets)
-
-def timestamp():
+def targets():
+    role = ""
+    if len(sys.argv) > 2:
+        role = sys.argv[2]
     repository = load_repository(REPO_PATH)
+    private_targets_key =  import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "target"))
+    load_targets(repository, role)
+    repository.targets.load_signing_key(private_targets_key)
+    if role:
+        repository.targets(role).load_signing_key(private_targets_key)
+    repository.snapshot.load_signing_key(private_targets_key)
+    repository.snapshot.expiration = datetime.datetime.now() + datetime.timedelta(days=90)
+    repository.targets.expiration = datetime.datetime.now() + datetime.timedelta(days=90)
+    timestamp(repository)
+    if role:
+        try:
+            os.mkdir(os.path.join(REPO_PATH, 'metadata', 'targets'))
+        except:
+            pass
+        shutil.copy(os.path.join(REPO_PATH, 'metadata.staged', 'targets', role + '.json'), os.path.join(REPO_PATH, 'metadata', 'targets'))
+        shutil.copy(os.path.join(REPO_PATH, 'metadata.staged', 'targets', role + '.json.gz'), os.path.join(REPO_PATH, 'metadata', 'targets'))
+    copy("snapshot.json")
+    copy("snapshot.json.gz")
+    copy("targets.json")
+    copy("targets.json.gz")
+
+def load_targets(repository, role=""):
+    if role:
+        targets = repository.targets(role)
+    else:
+        targets = repository.targets
+    list_of_targets = repository.get_filepaths_in_directory(os.path.join(REPO_PATH, "targets", role),
+                                                            recursive_walk=True, followlinks=True) 
+    targets.add_targets(list_of_targets)
+
+def timestamp(repository = None):
+    if not repository:
+        repository = load_repository(REPO_PATH)
     private_timestamp_key = import_rsa_privatekey_from_file(os.path.join(KEYS_PATH, "timestamp"))
     repository.timestamp.load_signing_key(private_timestamp_key)
+    repository.timestamp.expiration = datetime.datetime.now() + datetime.timedelta(days=1)
     repository.write_partial()
     copy("timestamp.json")
 
